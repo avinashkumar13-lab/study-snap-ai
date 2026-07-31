@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Badge } from '@/components/ui/badge'
 import { Switch } from '@/components/ui/switch'
 import { ScrollArea } from '@/components/ui/scroll-area'
+import { Progress } from '@/components/ui/progress'
 import { toast } from 'sonner'
 import {
   Sparkles, Brain, Zap, GraduationCap, BookOpen, Timer, FileDown, Printer,
@@ -123,6 +124,7 @@ function GeneratorForm({ onGenerated }) {
   const [form, setForm] = useState(emptyForm)
   const [loading, setLoading] = useState(false)
   const [customSubject, setCustomSubject] = useState(false)
+  const [progress, setProgress] = useState(0)
 
   const programs = useMemo(() => getPrograms(form.degree), [form.degree])
   const courses = useMemo(() => getCourses(form.degree, form.program), [form.degree, form.program])
@@ -135,6 +137,32 @@ function GeneratorForm({ onGenerated }) {
 
   const canSubmit = form.degree && form.subject && form.topic && !loading
 
+  // Safely parse a response even if it's HTML (Cloudflare error page).
+  const safeJson = async (res) => {
+    const ct = res.headers.get('content-type') || ''
+    if (ct.includes('application/json')) {
+      try { return await res.json() } catch { return null }
+    }
+    return null
+  }
+
+  // Poll /api/notes/{id} until the job is done (or failed).
+  const pollNote = async (id, onProgress) => {
+    const start = Date.now()
+    // ~5 minute maximum wait
+    for (let i = 0; i < 150; i++) {
+      await new Promise(r => setTimeout(r, 2000))
+      const r = await fetch(`/api/notes/${id}`, { cache: 'no-store' })
+      if (r.status === 404) continue
+      const data = await safeJson(r)
+      if (!data) continue
+      if (onProgress) onProgress(Math.min(95, Math.round((Date.now() - start) / 900)))
+      if (data.status === 'done') return data
+      if (data.status === 'failed') throw new Error(data.error || 'AI generation failed')
+    }
+    throw new Error('Notes are taking too long. Please try again.')
+  }
+
   const handleSubmit = async (modeOverride) => {
     if (!canSubmit) {
       toast.error('Please fill Degree, Subject, and Topic')
@@ -142,20 +170,29 @@ function GeneratorForm({ onGenerated }) {
     }
     const payload = { ...form, mode: modeOverride || form.mode }
     setLoading(true)
+    setProgress(3)
     try {
       const res = await fetch('/api/generate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Failed to generate notes')
+      const data = await safeJson(res)
+      if (!res.ok || !data) {
+        throw new Error(data?.error || `Server error (status ${res.status}). Please try again.`)
+      }
+      if (!data.id) throw new Error('Unexpected response from server')
+
+      setProgress(15)
+      const note = await pollNote(data.id, setProgress)
+      setProgress(100)
       toast.success('Notes ready!')
-      onGenerated(data)
+      onGenerated(note)
     } catch (e) {
-      toast.error(e.message)
+      toast.error(e.message || 'Something went wrong')
     } finally {
       setLoading(false)
+      setTimeout(() => setProgress(0), 800)
     }
   }
 
@@ -238,8 +275,20 @@ function GeneratorForm({ onGenerated }) {
           <Button size="lg" variant="outline" disabled={!canSubmit} onClick={() => handleSubmit('exam_tomorrow')} className="h-12 rounded-xl">
             <Timer className="mr-2 h-5 w-5" /> Exam Tomorrow Mode
           </Button>
-          <span className="text-xs text-muted-foreground">Typically takes 15–30 seconds.</span>
+          <span className="text-xs text-muted-foreground">Typically takes 30–90 seconds.</span>
         </div>
+        {loading && (
+          <div className="md:col-span-2 space-y-2">
+            <Progress value={progress} className="h-2" />
+            <div className="text-xs text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              {progress < 20 && 'Understanding the topic…'}
+              {progress >= 20 && progress < 45 && 'Consulting Claude Sonnet 4.5…'}
+              {progress >= 45 && progress < 75 && 'Crafting notes, formulas & MCQs…'}
+              {progress >= 75 && 'Almost done — polishing your Study Snap…'}
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
   )

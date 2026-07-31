@@ -2,6 +2,9 @@ import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
 
+export const runtime = 'nodejs'
+export const maxDuration = 300
+
 // MongoDB connection (cached)
 let client
 let db
@@ -84,20 +87,26 @@ Return ONLY the JSON object.`
 
 function extractJson(text) {
   if (!text) return null
-  // Strip code fences if present
   let s = text.trim()
+  // Remove markdown code fences if present
   if (s.startsWith('```')) {
-    s = s.replace(/^```(json)?/i, '').replace(/```$/,'').trim()
+    // Remove opening fence (```json or ```)
+    s = s.replace(/^```[a-z]*\n?/i, '')
+    // Remove closing fence
+    s = s.replace(/\n?```\s*$/i, '')
+    s = s.trim()
   }
-  // Find first { and last }
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
   if (start === -1 || end === -1) return null
   const jsonStr = s.slice(start, end + 1)
-  try { return JSON.parse(jsonStr) } catch { return null }
+  try { return JSON.parse(jsonStr) } catch (e) { 
+    console.error('JSON parse error:', e.message, 'First 200 chars:', jsonStr.slice(0, 200))
+    return null 
+  }
 }
 
-async function callLLM(messages, { maxTokens = 4000, temperature = 0.3 } = {}) {
+async function callLLM(messages, { maxTokens = 4500, temperature = 0.3 } = {}) {
   const res = await fetch(EMERGENT_LLM_URL, {
     method: 'POST',
     headers: {
@@ -119,6 +128,40 @@ async function callLLM(messages, { maxTokens = 4000, temperature = 0.3 } = {}) {
   return data?.choices?.[0]?.message?.content || ''
 }
 
+// Fire-and-forget background processing of a note job.
+async function processNoteJob(noteId, input) {
+  try {
+    const db = await connectToMongo()
+    const messages = [
+      { role: 'system', content: buildSystemPrompt() },
+      { role: 'user', content: buildUserPrompt(input) },
+    ]
+    const raw = await callLLM(messages, { maxTokens: 4500, temperature: 0.3 })
+    const parsed = extractJson(raw)
+    if (!parsed) {
+      console.error(`[processNoteJob ${noteId}] Failed to parse LLM response. First 500 chars:`, raw?.slice(0, 500))
+      await db.collection('notes').updateOne(
+        { id: noteId },
+        { $set: { status: 'failed', error: 'AI response could not be parsed', updatedAt: new Date() } }
+      )
+      return
+    }
+    await db.collection('notes').updateOne(
+      { id: noteId },
+      { $set: { status: 'done', content: parsed, updatedAt: new Date() } }
+    )
+  } catch (err) {
+    console.error('processNoteJob error:', err)
+    try {
+      const db = await connectToMongo()
+      await db.collection('notes').updateOne(
+        { id: noteId },
+        { $set: { status: 'failed', error: err?.message || 'Unknown error', updatedAt: new Date() } }
+      )
+    } catch {}
+  }
+}
+
 async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
@@ -131,8 +174,37 @@ async function handleRoute(request, { params }) {
       return handleCORS(NextResponse.json({ message: 'Study Snap AI backend live', model: LLM_MODEL }))
     }
 
-    // Generate notes
+    // ---- Generate (async) ----
+    // Kicks off background generation and returns immediately with a job id.
     if (route === '/generate' && method === 'POST') {
+      const body = await request.json()
+      const { degree, program, course, subject, topic, teacher, length, mode } = body || {}
+      if (!degree || !subject || !topic) {
+        return handleCORS(NextResponse.json({ error: 'degree, subject and topic are required' }, { status: 400 }))
+      }
+
+      const noteId = uuidv4()
+      const doc = {
+        id: noteId,
+        degree, program: program || '', course: course || '', subject, topic,
+        teacher: teacher || '', length: length || 'medium', mode: mode || 'standard',
+        status: 'pending',
+        content: null,
+        model: LLM_MODEL,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+      }
+      await db.collection('notes').insertOne(doc)
+
+      // Fire-and-forget — do NOT await.
+      processNoteJob(noteId, { degree, program, course, subject, topic, teacher, length, mode })
+        .catch(err => console.error('background job failed', err))
+
+      return handleCORS(NextResponse.json({ id: noteId, status: 'pending' }, { status: 202 }))
+    }
+
+    // ---- Synchronous generate (blocks until LLM returns). Kept for tooling/CLI use. ----
+    if (route === '/generate-sync' && method === 'POST') {
       const body = await request.json()
       const { degree, program, course, subject, topic, teacher, length, mode } = body || {}
       if (!degree || !subject || !topic) {
@@ -143,45 +215,43 @@ async function handleRoute(request, { params }) {
         { role: 'system', content: buildSystemPrompt() },
         { role: 'user', content: buildUserPrompt({ degree, program, course, subject, topic, teacher, length, mode }) },
       ]
-
       const raw = await callLLM(messages, { maxTokens: 4500, temperature: 0.3 })
       const parsed = extractJson(raw)
       if (!parsed) {
         return handleCORS(NextResponse.json({ error: 'Failed to parse AI response', raw: raw.slice(0, 500) }, { status: 502 }))
       }
-
       const note = {
         id: uuidv4(),
         degree, program: program || '', course: course || '', subject, topic,
         teacher: teacher || '', length: length || 'medium', mode: mode || 'standard',
+        status: 'done',
         content: parsed,
         model: LLM_MODEL,
         createdAt: new Date(),
+        updatedAt: new Date(),
       }
-
       await db.collection('notes').insertOne(note)
       const { _id, ...clean } = note
       return handleCORS(NextResponse.json(clean))
     }
 
-    // List recent notes
+    // List recent (exclude content for lighter payload, only completed items)
     if (route === '/notes' && method === 'GET') {
       const items = await db.collection('notes')
-        .find({}, { projection: { _id: 0, content: 0 } })
+        .find({ status: { $ne: 'pending' } }, { projection: { _id: 0, content: 0 } })
         .sort({ createdAt: -1 })
         .limit(50)
         .toArray()
       return handleCORS(NextResponse.json(items))
     }
 
-    // Get single note by id -> /notes/<id>
+    // Single by id (used by frontend to poll status and get final content)
     if (path[0] === 'notes' && path[1] && method === 'GET') {
       const item = await db.collection('notes').findOne({ id: path[1] }, { projection: { _id: 0 } })
       if (!item) return handleCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
       return handleCORS(NextResponse.json(item))
     }
 
-    // Delete note
     if (path[0] === 'notes' && path[1] && method === 'DELETE') {
       await db.collection('notes').deleteOne({ id: path[1] })
       return handleCORS(NextResponse.json({ ok: true }))

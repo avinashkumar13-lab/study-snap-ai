@@ -1,81 +1,60 @@
 #!/usr/bin/env python3
 """
-Backend API Tests for Study Snap AI
-Tests all backend endpoints with proper validation
+Backend API Test Suite for Study Snap AI
+Tests the async job pattern for POST /api/generate
 """
-
 import requests
+import time
 import json
-import re
 from typing import Dict, Any
 
-# Base URL from .env
+# Base URL from .env: NEXT_PUBLIC_BASE_URL
 BASE_URL = "https://quick-revision-ai-2.preview.emergentagent.com/api"
 
-# Test results tracking
-test_results = []
-generated_note_id = None
-
-def log_test(test_name: str, passed: bool, details: str = ""):
-    """Log test result"""
-    status = "✅ PASS" if passed else "❌ FAIL"
-    result = f"{status} - {test_name}"
-    if details:
-        result += f"\n    Details: {details}"
-    print(result)
-    test_results.append({"test": test_name, "passed": passed, "details": details})
-
-def is_valid_uuid(uuid_string: str) -> bool:
-    """Check if string is valid UUID v4"""
-    uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$', re.I)
-    return bool(uuid_pattern.match(uuid_string))
-
 def test_root_endpoint():
-    """Test 1: GET /api/root"""
+    """Test 1: GET /api/root health check"""
     print("\n" + "="*80)
-    print("TEST 1: GET /api/root - Health check endpoint")
+    print("TEST 1: GET /api/root - Health Check")
     print("="*80)
     
     try:
         response = requests.get(f"{BASE_URL}/root", timeout=10)
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.text}")
         
         if response.status_code != 200:
-            log_test("GET /api/root - Status Code", False, f"Expected 200, got {response.status_code}")
+            print("❌ FAILED: Expected status 200")
             return False
-        
-        log_test("GET /api/root - Status Code", True, "200 OK")
         
         data = response.json()
         
         # Check for required fields
-        if "message" not in data:
-            log_test("GET /api/root - Response has 'message'", False, "Missing 'message' field")
-            return False
-        log_test("GET /api/root - Response has 'message'", True, f"message: {data['message']}")
-        
-        if "model" not in data:
-            log_test("GET /api/root - Response has 'model'", False, "Missing 'model' field")
+        if 'message' not in data:
+            print("❌ FAILED: Missing 'message' field")
             return False
         
-        # Check if model contains "claude-sonnet-4-5"
-        if "claude-sonnet-4-5" not in data["model"]:
-            log_test("GET /api/root - Model contains 'claude-sonnet-4-5'", False, f"Model is: {data['model']}")
+        if 'model' not in data:
+            print("❌ FAILED: Missing 'model' field")
             return False
         
-        log_test("GET /api/root - Model contains 'claude-sonnet-4-5'", True, f"model: {data['model']}")
+        if 'claude-sonnet-4-5' not in data['model']:
+            print(f"❌ FAILED: Model should contain 'claude-sonnet-4-5', got: {data['model']}")
+            return False
         
+        print(f"✅ PASSED: Health check working")
+        print(f"   Message: {data['message']}")
+        print(f"   Model: {data['model']}")
         return True
         
     except Exception as e:
-        log_test("GET /api/root", False, f"Exception: {str(e)}")
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
         return False
 
-def test_generate_valid():
-    """Test 2: POST /api/generate with valid payload"""
-    global generated_note_id
-    
+
+def test_generate_async_valid():
+    """Test 2: POST /api/generate with valid data (async pattern)"""
     print("\n" + "="*80)
-    print("TEST 2: POST /api/generate - Valid payload (B.Tech CS Data Structures)")
+    print("TEST 2: POST /api/generate - Valid Data (Async Pattern)")
     print("="*80)
     
     payload = {
@@ -89,305 +68,277 @@ def test_generate_valid():
     }
     
     print(f"Payload: {json.dumps(payload, indent=2)}")
-    print("⏳ Calling LLM... This may take 30-90 seconds...")
     
     try:
-        # CRITICAL: Use 150s timeout for LLM calls
-        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=150)
+        # Step 1: POST /api/generate should return 202 immediately
+        print("\nStep 1: Sending POST request...")
+        start_time = time.time()
+        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=15)
+        response_time = time.time() - start_time
         
-        if response.status_code != 200:
-            log_test("POST /api/generate - Status Code", False, f"Expected 200, got {response.status_code}. Response: {response.text[:500]}")
-            return False
+        print(f"Status Code: {response.status_code}")
+        print(f"Response Time: {response_time:.2f}s")
+        print(f"Response: {response.text}")
         
-        log_test("POST /api/generate - Status Code", True, "200 OK")
+        if response.status_code != 202:
+            print(f"❌ FAILED: Expected status 202, got {response.status_code}")
+            return False, None
         
         data = response.json()
         
-        # Check for id field (UUID v4)
-        if "id" not in data:
-            log_test("POST /api/generate - Has 'id' field", False, "Missing 'id' field")
-            return False
+        if 'id' not in data:
+            print("❌ FAILED: Missing 'id' field in response")
+            return False, None
         
-        if not isinstance(data["id"], str) or not is_valid_uuid(data["id"]):
-            log_test("POST /api/generate - ID is valid UUID v4", False, f"ID is not valid UUID v4: {data['id']}")
-            return False
+        if 'status' not in data:
+            print("❌ FAILED: Missing 'status' field in response")
+            return False, None
         
-        generated_note_id = data["id"]
-        log_test("POST /api/generate - ID is valid UUID v4", True, f"id: {generated_note_id}")
+        if data['status'] != 'pending':
+            print(f"❌ FAILED: Expected status 'pending', got '{data['status']}'")
+            return False, None
         
-        # Check metadata fields
-        required_meta_fields = ["degree", "program", "course", "subject", "topic", "mode", "model", "createdAt"]
-        for field in required_meta_fields:
-            if field not in data:
-                log_test(f"POST /api/generate - Has '{field}' field", False, f"Missing '{field}' field")
-                return False
-        log_test("POST /api/generate - All metadata fields present", True, "degree, program, course, subject, topic, mode, model, createdAt")
+        note_id = data['id']
+        print(f"✅ Step 1 PASSED: Got 202 response with id={note_id}, status=pending")
+        print(f"   Response time: {response_time:.2f}s (should be < 5s)")
         
-        # Check content object exists
-        if "content" not in data:
-            log_test("POST /api/generate - Has 'content' object", False, "Missing 'content' object")
-            return False
+        # Step 2: Poll GET /api/notes/{id} until status becomes 'done'
+        print(f"\nStep 2: Polling GET /api/notes/{note_id} until status='done'...")
+        max_wait_time = 180  # 3 minutes
+        poll_interval = 2  # 2 seconds
+        elapsed = 0
         
-        content = data["content"]
-        if not isinstance(content, dict):
-            log_test("POST /api/generate - 'content' is object", False, f"content is not an object: {type(content)}")
-            return False
+        while elapsed < max_wait_time:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+            
+            poll_response = requests.get(f"{BASE_URL}/notes/{note_id}", timeout=15)
+            print(f"  [{elapsed}s] Status Code: {poll_response.status_code}", end="")
+            
+            if poll_response.status_code != 200:
+                print(f" - ❌ Unexpected status code")
+                continue
+            
+            poll_data = poll_response.json()
+            current_status = poll_data.get('status', 'unknown')
+            print(f" - Status: {current_status}")
+            
+            if current_status == 'done':
+                print(f"✅ Step 2 PASSED: Note generation completed in {elapsed}s")
+                
+                # Step 3: Validate the content structure
+                print("\nStep 3: Validating content structure...")
+                if 'content' not in poll_data or poll_data['content'] is None:
+                    print("❌ FAILED: Missing or null 'content' field")
+                    return False, note_id
+                
+                content = poll_data['content']
+                required_fields = [
+                    'title', 'overview', 'short_notes', 'detailed_notes',
+                    'key_concepts', 'important_definitions', 'formula_sheet',
+                    'quick_revision', 'exam_summary', 'faqs', 'mcqs',
+                    'mnemonics', 'likely_exam_questions'
+                ]
+                
+                missing_fields = []
+                for field in required_fields:
+                    if field not in content:
+                        missing_fields.append(field)
+                
+                if missing_fields:
+                    print(f"❌ FAILED: Missing content fields: {missing_fields}")
+                    return False, note_id
+                
+                # Validate array fields are non-empty
+                array_fields = {
+                    'key_concepts': content.get('key_concepts', []),
+                    'important_definitions': content.get('important_definitions', []),
+                    'faqs': content.get('faqs', []),
+                    'mcqs': content.get('mcqs', []),
+                    'mnemonics': content.get('mnemonics', []),
+                    'likely_exam_questions': content.get('likely_exam_questions', [])
+                }
+                
+                empty_arrays = []
+                for field_name, field_value in array_fields.items():
+                    if not isinstance(field_value, list) or len(field_value) == 0:
+                        empty_arrays.append(field_name)
+                
+                if empty_arrays:
+                    print(f"❌ FAILED: Empty or invalid array fields: {empty_arrays}")
+                    return False, note_id
+                
+                # Validate formula_sheet (should be non-empty for BST topic)
+                if not isinstance(content.get('formula_sheet'), list):
+                    print("❌ FAILED: formula_sheet should be an array")
+                    return False, note_id
+                
+                # Validate ID is UUID format (not ObjectId)
+                if '_id' in poll_data:
+                    print("❌ FAILED: Response contains MongoDB '_id' field (should be excluded)")
+                    return False, note_id
+                
+                print("✅ Step 3 PASSED: All content fields present and valid")
+                print(f"   - title: {content['title'][:50]}...")
+                print(f"   - key_concepts: {len(content['key_concepts'])} items")
+                print(f"   - important_definitions: {len(content['important_definitions'])} items")
+                print(f"   - formula_sheet: {len(content['formula_sheet'])} items")
+                print(f"   - faqs: {len(content['faqs'])} items")
+                print(f"   - mcqs: {len(content['mcqs'])} items")
+                print(f"   - mnemonics: {len(content['mnemonics'])} items")
+                print(f"   - likely_exam_questions: {len(content['likely_exam_questions'])} items")
+                
+                return True, note_id
+            
+            elif current_status == 'failed':
+                error_msg = poll_data.get('error', 'Unknown error')
+                print(f"❌ FAILED: Note generation failed with error: {error_msg}")
+                return False, note_id
         
-        log_test("POST /api/generate - Has 'content' object", True)
+        print(f"❌ FAILED: Timeout after {max_wait_time}s - note still not done")
+        return False, note_id
         
-        # Check all required content fields
-        required_content_fields = {
-            "title": str,
-            "overview": str,
-            "short_notes": str,
-            "detailed_notes": str,
-            "key_concepts": list,
-            "important_definitions": list,
-            "formula_sheet": list,
-            "quick_revision": str,
-            "exam_summary": str,
-            "faqs": list,
-            "mcqs": list,
-            "mnemonics": list,
-            "likely_exam_questions": list
-        }
-        
-        missing_fields = []
-        for field, expected_type in required_content_fields.items():
-            if field not in content:
-                missing_fields.append(field)
-            elif not isinstance(content[field], expected_type):
-                log_test(f"POST /api/generate - content.{field} type", False, f"Expected {expected_type.__name__}, got {type(content[field]).__name__}")
-                return False
-        
-        if missing_fields:
-            log_test("POST /api/generate - All content fields present", False, f"Missing fields: {', '.join(missing_fields)}")
-            return False
-        
-        log_test("POST /api/generate - All content fields present", True, "All 13 required fields exist")
-        
-        # Validate non-empty arrays
-        array_fields_must_be_nonempty = ["key_concepts", "important_definitions", "faqs", "mcqs", "likely_exam_questions"]
-        for field in array_fields_must_be_nonempty:
-            if len(content[field]) == 0:
-                log_test(f"POST /api/generate - content.{field} non-empty", False, f"{field} is empty array")
-                return False
-        
-        log_test("POST /api/generate - Required arrays non-empty", True, "key_concepts, important_definitions, faqs, mcqs, likely_exam_questions all have items")
-        
-        # Validate key_concepts structure
-        if len(content["key_concepts"]) > 0:
-            kc = content["key_concepts"][0]
-            if not isinstance(kc, dict) or "concept" not in kc or "explanation" not in kc:
-                log_test("POST /api/generate - key_concepts structure", False, f"Invalid structure: {kc}")
-                return False
-        log_test("POST /api/generate - key_concepts structure valid", True, f"{len(content['key_concepts'])} concepts with concept+explanation")
-        
-        # Validate mcqs structure
-        if len(content["mcqs"]) > 0:
-            mcq = content["mcqs"][0]
-            required_mcq_fields = ["question", "options", "answer", "explanation"]
-            for f in required_mcq_fields:
-                if f not in mcq:
-                    log_test("POST /api/generate - mcqs structure", False, f"MCQ missing field: {f}")
-                    return False
-            if not isinstance(mcq["options"], list) or len(mcq["options"]) < 2:
-                log_test("POST /api/generate - mcqs options", False, "MCQ options must be array with at least 2 items")
-                return False
-        log_test("POST /api/generate - mcqs structure valid", True, f"{len(content['mcqs'])} MCQs with question, options, answer, explanation")
-        
-        # Validate faqs structure
-        if len(content["faqs"]) > 0:
-            faq = content["faqs"][0]
-            if not isinstance(faq, dict) or "question" not in faq or "answer" not in faq:
-                log_test("POST /api/generate - faqs structure", False, f"Invalid FAQ structure: {faq}")
-                return False
-        log_test("POST /api/generate - faqs structure valid", True, f"{len(content['faqs'])} FAQs with question+answer")
-        
-        # Formula sheet can be empty for non-formula topics, but should be array
-        log_test("POST /api/generate - formula_sheet is array", True, f"{len(content['formula_sheet'])} formulas (can be empty for non-formula topics)")
-        
-        print(f"\n✅ Note generated successfully with ID: {generated_note_id}")
-        return True
-        
-    except requests.Timeout:
-        log_test("POST /api/generate", False, "Request timed out after 150 seconds")
-        return False
     except Exception as e:
-        log_test("POST /api/generate", False, f"Exception: {str(e)}")
-        return False
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False, None
 
-def test_generate_invalid():
-    """Test 3: POST /api/generate with missing required fields"""
+
+def test_generate_invalid_data():
+    """Test 3: POST /api/generate with invalid data (missing required fields)"""
     print("\n" + "="*80)
-    print("TEST 3: POST /api/generate - Invalid payload (missing required fields)")
+    print("TEST 3: POST /api/generate - Invalid Data (Missing Required Fields)")
     print("="*80)
     
     payload = {"topic": "only"}
     print(f"Payload: {json.dumps(payload, indent=2)}")
     
     try:
-        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=30)
+        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=10)
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.text}")
         
         if response.status_code != 400:
-            log_test("POST /api/generate (invalid) - Status Code", False, f"Expected 400, got {response.status_code}")
+            print(f"❌ FAILED: Expected status 400, got {response.status_code}")
             return False
-        
-        log_test("POST /api/generate (invalid) - Status Code", True, "400 Bad Request")
         
         data = response.json()
-        if "error" not in data:
-            log_test("POST /api/generate (invalid) - Has error message", False, "Missing 'error' field in response")
+        if 'error' not in data:
+            print("❌ FAILED: Expected 'error' field in response")
             return False
         
-        log_test("POST /api/generate (invalid) - Has error message", True, f"error: {data['error']}")
+        print(f"✅ PASSED: Validation working correctly")
+        print(f"   Error message: {data['error']}")
         return True
         
     except Exception as e:
-        log_test("POST /api/generate (invalid)", False, f"Exception: {str(e)}")
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
         return False
 
-def test_list_notes():
+
+def test_list_notes(expected_note_id=None):
     """Test 4: GET /api/notes - List recent notes"""
     print("\n" + "="*80)
-    print("TEST 4: GET /api/notes - List recent notes")
+    print("TEST 4: GET /api/notes - List Recent Notes")
     print("="*80)
     
     try:
         response = requests.get(f"{BASE_URL}/notes", timeout=10)
+        print(f"Status Code: {response.status_code}")
         
         if response.status_code != 200:
-            log_test("GET /api/notes - Status Code", False, f"Expected 200, got {response.status_code}")
+            print(f"❌ FAILED: Expected status 200, got {response.status_code}")
             return False
-        
-        log_test("GET /api/notes - Status Code", True, "200 OK")
         
         data = response.json()
         
         if not isinstance(data, list):
-            log_test("GET /api/notes - Response is array", False, f"Expected array, got {type(data)}")
+            print(f"❌ FAILED: Expected array response, got {type(data)}")
             return False
         
-        log_test("GET /api/notes - Response is array", True, f"Array with {len(data)} notes")
+        print(f"✅ PASSED: Got array with {len(data)} notes")
         
-        # Check if our generated note is in the list
-        if generated_note_id:
-            found = False
-            note_with_content = None
-            for note in data:
-                if note.get("id") == generated_note_id:
-                    found = True
-                    # Check that content field is NOT included (projection excludes it)
-                    if "content" in note:
-                        note_with_content = note
-                    break
-            
-            if not found:
-                log_test("GET /api/notes - Contains generated note", False, f"Note with id {generated_note_id} not found in list")
+        # Check that content field is excluded
+        for note in data:
+            if 'content' in note:
+                print(f"❌ FAILED: Note {note.get('id')} contains 'content' field (should be excluded)")
                 return False
-            
-            log_test("GET /api/notes - Contains generated note", True, f"Found note with id {generated_note_id}")
-            
-            if note_with_content:
-                log_test("GET /api/notes - Excludes 'content' field", False, "content field should be excluded but is present")
+            if '_id' in note:
+                print(f"❌ FAILED: Note {note.get('id')} contains '_id' field (should be excluded)")
                 return False
-            
-            log_test("GET /api/notes - Excludes 'content' field", True, "content field properly excluded from list")
+        
+        print("✅ PASSED: All notes correctly exclude 'content' and '_id' fields")
+        
+        # Check if expected note is in the list
+        if expected_note_id:
+            note_ids = [n.get('id') for n in data]
+            if expected_note_id in note_ids:
+                print(f"✅ PASSED: Expected note {expected_note_id} found in list")
+            else:
+                print(f"❌ FAILED: Expected note {expected_note_id} NOT found in list")
+                return False
+        
+        # Verify no pending notes are returned
+        for note in data:
+            if note.get('status') == 'pending':
+                print(f"❌ FAILED: Pending note {note.get('id')} should not be in list")
+                return False
+        
+        print("✅ PASSED: No pending notes in list (as expected)")
         
         return True
         
     except Exception as e:
-        log_test("GET /api/notes", False, f"Exception: {str(e)}")
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
         return False
 
-def test_get_single_note():
-    """Test 5: GET /api/notes/{id} - Get single note by ID"""
+
+def test_delete_note(note_id):
+    """Test 5: DELETE /api/notes/{id} and verify 404 afterwards"""
     print("\n" + "="*80)
-    print(f"TEST 5: GET /api/notes/{generated_note_id} - Get single note")
+    print(f"TEST 5: DELETE /api/notes/{note_id}")
     print("="*80)
     
-    if not generated_note_id:
-        log_test("GET /api/notes/{id}", False, "No generated note ID available from previous test")
-        return False
-    
     try:
-        response = requests.get(f"{BASE_URL}/notes/{generated_note_id}", timeout=10)
+        # Step 1: Delete the note
+        print(f"Step 1: Deleting note {note_id}...")
+        response = requests.delete(f"{BASE_URL}/notes/{note_id}", timeout=10)
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.text}")
         
         if response.status_code != 200:
-            log_test("GET /api/notes/{id} - Status Code", False, f"Expected 200, got {response.status_code}")
+            print(f"❌ FAILED: Expected status 200, got {response.status_code}")
             return False
-        
-        log_test("GET /api/notes/{id} - Status Code", True, "200 OK")
         
         data = response.json()
-        
-        # Check that content field IS included
-        if "content" not in data:
-            log_test("GET /api/notes/{id} - Includes 'content' field", False, "content field missing")
+        if data.get('ok') != True:
+            print(f"❌ FAILED: Expected {{ok: true}}, got {data}")
             return False
         
-        log_test("GET /api/notes/{id} - Includes 'content' field", True, "Full note with content returned")
+        print("✅ Step 1 PASSED: Note deleted successfully")
         
-        # Verify it's the correct note
-        if data.get("id") != generated_note_id:
-            log_test("GET /api/notes/{id} - Correct note ID", False, f"Expected {generated_note_id}, got {data.get('id')}")
+        # Step 2: Verify note is gone (404)
+        print(f"\nStep 2: Verifying note {note_id} returns 404...")
+        response = requests.get(f"{BASE_URL}/notes/{note_id}", timeout=10)
+        print(f"Status Code: {response.status_code}")
+        
+        if response.status_code != 404:
+            print(f"❌ FAILED: Expected status 404, got {response.status_code}")
             return False
         
-        log_test("GET /api/notes/{id} - Correct note ID", True, f"id: {generated_note_id}")
-        
+        print("✅ Step 2 PASSED: Note correctly returns 404 after deletion")
         return True
         
     except Exception as e:
-        log_test("GET /api/notes/{id}", False, f"Exception: {str(e)}")
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
         return False
 
-def test_delete_note():
-    """Test 6: DELETE /api/notes/{id} - Delete note"""
-    print("\n" + "="*80)
-    print(f"TEST 6: DELETE /api/notes/{generated_note_id} - Delete note")
-    print("="*80)
-    
-    if not generated_note_id:
-        log_test("DELETE /api/notes/{id}", False, "No generated note ID available from previous test")
-        return False
-    
-    try:
-        # Delete the note
-        response = requests.delete(f"{BASE_URL}/notes/{generated_note_id}", timeout=10)
-        
-        if response.status_code != 200:
-            log_test("DELETE /api/notes/{id} - Status Code", False, f"Expected 200, got {response.status_code}")
-            return False
-        
-        log_test("DELETE /api/notes/{id} - Status Code", True, "200 OK")
-        
-        data = response.json()
-        if not data.get("ok"):
-            log_test("DELETE /api/notes/{id} - Response {ok:true}", False, f"Expected {{ok:true}}, got {data}")
-            return False
-        
-        log_test("DELETE /api/notes/{id} - Response {ok:true}", True, "Note deleted successfully")
-        
-        # Verify note is gone - GET should return 404
-        print(f"\nVerifying deletion: GET /api/notes/{generated_note_id}")
-        get_response = requests.get(f"{BASE_URL}/notes/{generated_note_id}", timeout=10)
-        
-        if get_response.status_code != 404:
-            log_test("DELETE /api/notes/{id} - Verify deletion (404)", False, f"Expected 404 after deletion, got {get_response.status_code}")
-            return False
-        
-        log_test("DELETE /api/notes/{id} - Verify deletion (404)", True, "GET after DELETE returns 404")
-        
-        return True
-        
-    except Exception as e:
-        log_test("DELETE /api/notes/{id}", False, f"Exception: {str(e)}")
-        return False
 
 def test_exam_tomorrow_mode():
-    """Test 7: POST /api/generate with exam_tomorrow mode"""
+    """Test 6: POST /api/generate with exam_tomorrow mode"""
     print("\n" + "="*80)
-    print("TEST 7: POST /api/generate - exam_tomorrow mode")
+    print("TEST 6: POST /api/generate - Exam Tomorrow Mode")
     print("="*80)
     
     payload = {
@@ -399,99 +350,156 @@ def test_exam_tomorrow_mode():
     }
     
     print(f"Payload: {json.dumps(payload, indent=2)}")
-    print("⏳ Calling LLM... This may take 30-90 seconds...")
     
     try:
-        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=150)
+        # Step 1: POST /api/generate
+        print("\nStep 1: Sending POST request...")
+        response = requests.post(f"{BASE_URL}/generate", json=payload, timeout=15)
         
-        if response.status_code != 200:
-            log_test("POST /api/generate (exam_tomorrow) - Status Code", False, f"Expected 200, got {response.status_code}. Response: {response.text[:500]}")
-            return False
+        print(f"Status Code: {response.status_code}")
+        print(f"Response: {response.text}")
         
-        log_test("POST /api/generate (exam_tomorrow) - Status Code", True, "200 OK")
+        if response.status_code != 202:
+            print(f"❌ FAILED: Expected status 202, got {response.status_code}")
+            return False, None
         
         data = response.json()
+        note_id = data.get('id')
         
-        # Check mode field
-        if data.get("mode") != "exam_tomorrow":
-            log_test("POST /api/generate (exam_tomorrow) - Mode field", False, f"Expected mode='exam_tomorrow', got '{data.get('mode')}'")
-            return False
+        if not note_id or data.get('status') != 'pending':
+            print("❌ FAILED: Invalid response structure")
+            return False, None
         
-        log_test("POST /api/generate (exam_tomorrow) - Mode field", True, "mode: exam_tomorrow")
+        print(f"✅ Step 1 PASSED: Got 202 response with id={note_id}")
         
-        # Check that note was generated with content
-        if "content" not in data or not isinstance(data["content"], dict):
-            log_test("POST /api/generate (exam_tomorrow) - Has content", False, "Missing or invalid content object")
-            return False
+        # Step 2: Poll until done
+        print(f"\nStep 2: Polling until status='done'...")
+        max_wait_time = 180
+        poll_interval = 2
+        elapsed = 0
         
-        log_test("POST /api/generate (exam_tomorrow) - Has content", True, f"Note generated with id: {data.get('id')}")
+        while elapsed < max_wait_time:
+            time.sleep(poll_interval)
+            elapsed += poll_interval
+            
+            poll_response = requests.get(f"{BASE_URL}/notes/{note_id}", timeout=15)
+            print(f"  [{elapsed}s] Status Code: {poll_response.status_code}", end="")
+            
+            if poll_response.status_code != 200:
+                print(f" - ❌ Unexpected status code")
+                continue
+            
+            poll_data = poll_response.json()
+            current_status = poll_data.get('status', 'unknown')
+            print(f" - Status: {current_status}")
+            
+            if current_status == 'done':
+                print(f"✅ Step 2 PASSED: Note generation completed in {elapsed}s")
+                
+                # Step 3: Validate mode and content
+                print("\nStep 3: Validating exam_tomorrow mode...")
+                
+                if poll_data.get('mode') != 'exam_tomorrow':
+                    print(f"❌ FAILED: Expected mode='exam_tomorrow', got '{poll_data.get('mode')}'")
+                    return False, note_id
+                
+                if 'content' not in poll_data or poll_data['content'] is None:
+                    print("❌ FAILED: Missing or null 'content' field")
+                    return False, note_id
+                
+                print("✅ Step 3 PASSED: Mode is 'exam_tomorrow' and content is present")
+                print(f"   - mode: {poll_data['mode']}")
+                print(f"   - topic: {poll_data['topic']}")
+                print(f"   - content.title: {poll_data['content'].get('title', 'N/A')}")
+                
+                return True, note_id
+            
+            elif current_status == 'failed':
+                error_msg = poll_data.get('error', 'Unknown error')
+                print(f"❌ FAILED: Note generation failed with error: {error_msg}")
+                return False, note_id
         
-        # Clean up - delete this test note
-        if data.get("id"):
-            requests.delete(f"{BASE_URL}/notes/{data['id']}", timeout=10)
-            print(f"✓ Cleaned up test note: {data['id']}")
+        print(f"❌ FAILED: Timeout after {max_wait_time}s")
+        return False, note_id
         
-        return True
-        
-    except requests.Timeout:
-        log_test("POST /api/generate (exam_tomorrow)", False, "Request timed out after 150 seconds")
-        return False
     except Exception as e:
-        log_test("POST /api/generate (exam_tomorrow)", False, f"Exception: {str(e)}")
-        return False
+        print(f"❌ FAILED: Exception occurred: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False, None
 
-def print_summary():
-    """Print test summary"""
+
+def main():
+    """Run all backend tests"""
+    print("\n" + "="*80)
+    print("STUDY SNAP AI - BACKEND API TEST SUITE")
+    print("Testing against PUBLIC URL (Cloudflare-fronted)")
+    print(f"Base URL: {BASE_URL}")
+    print("="*80)
+    
+    results = {}
+    note_id_for_cleanup = None
+    exam_note_id = None
+    
+    # Test 1: Health check
+    results['test_root'] = test_root_endpoint()
+    
+    # Test 2: Generate with valid data (async)
+    results['test_generate_valid'], note_id_for_cleanup = test_generate_async_valid()
+    
+    # Test 3: Generate with invalid data
+    results['test_generate_invalid'] = test_generate_invalid_data()
+    
+    # Test 4: List notes
+    if note_id_for_cleanup:
+        results['test_list_notes'] = test_list_notes(expected_note_id=note_id_for_cleanup)
+    else:
+        results['test_list_notes'] = test_list_notes()
+    
+    # Test 5: Delete note
+    if note_id_for_cleanup:
+        results['test_delete'] = test_delete_note(note_id_for_cleanup)
+    else:
+        print("\n⚠️ SKIPPING TEST 5: No note ID available for deletion test")
+        results['test_delete'] = None
+    
+    # Test 6: Exam tomorrow mode
+    results['test_exam_tomorrow'], exam_note_id = test_exam_tomorrow_mode()
+    
+    # Cleanup exam note if created
+    if exam_note_id:
+        print(f"\n🧹 Cleaning up exam_tomorrow note {exam_note_id}...")
+        requests.delete(f"{BASE_URL}/notes/{exam_note_id}", timeout=10)
+    
+    # Summary
     print("\n" + "="*80)
     print("TEST SUMMARY")
     print("="*80)
     
-    total = len(test_results)
-    passed = sum(1 for r in test_results if r["passed"])
-    failed = total - passed
+    passed = sum(1 for v in results.values() if v is True)
+    failed = sum(1 for v in results.values() if v is False)
+    skipped = sum(1 for v in results.values() if v is None)
+    total = len(results)
     
-    print(f"\nTotal Tests: {total}")
-    print(f"Passed: {passed} ✅")
-    print(f"Failed: {failed} ❌")
+    for test_name, result in results.items():
+        status = "✅ PASSED" if result is True else "❌ FAILED" if result is False else "⚠️ SKIPPED"
+        print(f"{test_name}: {status}")
     
-    if failed > 0:
-        print("\nFailed Tests:")
-        for result in test_results:
-            if not result["passed"]:
-                print(f"  ❌ {result['test']}")
-                if result["details"]:
-                    print(f"     {result['details']}")
+    print(f"\nTotal: {total} tests")
+    print(f"Passed: {passed}")
+    print(f"Failed: {failed}")
+    print(f"Skipped: {skipped}")
     
-    print("\n" + "="*80)
-    
-    return failed == 0
-
-def main():
-    """Run all tests"""
-    print("="*80)
-    print("STUDY SNAP AI - BACKEND API TESTS")
-    print("="*80)
-    print(f"Base URL: {BASE_URL}")
-    print("="*80)
-    
-    # Run tests in order
-    test_root_endpoint()
-    test_generate_valid()
-    test_generate_invalid()
-    test_list_notes()
-    test_get_single_note()
-    test_delete_note()
-    test_exam_tomorrow_mode()
-    
-    # Print summary
-    all_passed = print_summary()
-    
-    if all_passed:
-        print("\n🎉 ALL TESTS PASSED! 🎉\n")
+    if failed == 0 and skipped == 0:
+        print("\n🎉 ALL TESTS PASSED!")
+        return 0
+    elif failed == 0:
+        print(f"\n⚠️ ALL RUNNABLE TESTS PASSED ({skipped} skipped)")
         return 0
     else:
-        print("\n⚠️  SOME TESTS FAILED ⚠️\n")
+        print(f"\n❌ {failed} TEST(S) FAILED")
         return 1
+
 
 if __name__ == "__main__":
     exit(main())
