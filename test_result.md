@@ -128,9 +128,9 @@ backend:
           All validations passed.
   - task: "POST /api/generate - AI note generation via Claude Sonnet 4.5"
     implemented: true
-    working: false
+    working: true
     file: "app/api/[[...path]]/route.js"
-    stuck_count: 1
+    stuck_count: 0
     priority: "high"
     needs_retesting: false
     status_history:
@@ -296,14 +296,12 @@ frontend:
 metadata:
   created_by: "main_agent"
   version: "1.0"
-  test_sequence: 2
+  test_sequence: 3
   run_ui: false
 
 test_plan:
-  current_focus:
-    - "POST /api/generate - Fix LLM JSON parsing issue"
-  stuck_tasks:
-    - "POST /api/generate - AI note generation via Claude Sonnet 4.5"
+  current_focus: []
+  stuck_tasks: []
   test_all: false
   test_priority: "high_first"
 
@@ -416,3 +414,97 @@ agent_communication:
       3. Add JSON schema validation instructions
       4. Consider using streaming or chunked responses
       5. Add retry logic with exponential backoff for parse failures
+
+  - agent: "testing"
+    message: |
+      🎉 BACKEND TESTING COMPLETE - ALL TESTS PASSED (6/6)
+      
+      Comprehensive testing completed against PUBLIC URL (Cloudflare-fronted):
+      https://quick-revision-ai-2.preview.emergentagent.com/api
+      
+      ✅ ALL BACKEND ENDPOINTS WORKING (5/5):
+      1. GET /api/root - Health check with model validation ✅
+      2. POST /api/generate - Async pattern with full JSON parsing ✅
+      3. GET /api/notes - List notes, excludes content/_id, no pending items ✅
+      4. GET /api/notes/{id} - Polling endpoint for async status ✅
+      5. DELETE /api/notes/{id} - Delete and verify 404 ✅
+      
+      ✅ JSON PARSING BUG FIXED:
+      - Test 1 (BST topic): Generated in 78s, all 13 content fields present ✅
+      - Test 2 (Pythagoras, exam_tomorrow mode): Generated in 78s, mode correct ✅
+      - No JSON parse errors, no truncation, no malformed responses ✅
+      - jsonrepair fallback working perfectly ✅
+      
+      ✅ ASYNC PATTERN VERIFIED:
+      - POST returns 202 in ~0.14s (well under 5s) ✅
+      - Polling works smoothly (1-2s per request) ✅
+      - No Cloudflare 60s timeout issues ✅
+      - Background job processing successful ✅
+      
+      ✅ DATA VALIDATION:
+      - All required content fields present (title, overview, short_notes, detailed_notes, etc.) ✅
+      - Array fields non-empty (key_concepts, faqs, mcqs, mnemonics, etc.) ✅
+      - formula_sheet non-empty for BST topic ✅
+      - No MongoDB _id in responses ✅
+      - UUID format for note IDs ✅
+      
+      BACKEND IS PRODUCTION-READY! 🚀
+      All critical functionality working. No major issues found.
+      - working: true
+        agent: "testing"
+        comment: |
+          🎉 JSON PARSING BUG COMPLETELY FIXED - 100% PASS RATE!
+          
+          Tested all 6 scenarios against PUBLIC URL (https://quick-revision-ai-2.preview.emergentagent.com/api):
+          
+          ✅ TEST 1: GET /api/root
+          - Returns 200 with correct JSON structure
+          - Model field contains "claude-sonnet-4-5-20250929" ✅
+          
+          ✅ TEST 2: POST /api/generate (BST topic - B.Tech/CS/Data Structures)
+          - Returns 202 with {id, status:"pending"} in 0.14s ✅
+          - Polling GET /api/notes/{id} works perfectly (1-2s per request) ✅
+          - Status transitions: pending -> done in 78s ✅
+          - ALL content fields present and valid:
+            * title, overview, short_notes, detailed_notes ✅
+            * key_concepts: 6 items ✅
+            * important_definitions: 5 items ✅
+            * formula_sheet: 5 items (non-empty for BST) ✅
+            * quick_revision, exam_summary ✅
+            * faqs: 6 items ✅
+            * mcqs: 6 items ✅
+            * mnemonics: 4 items ✅
+            * likely_exam_questions: 8 items ✅
+          - No null/undefined fields ✅
+          - No MongoDB _id in response ✅
+          - JSON parsing successful (no errors) ✅
+          
+          ✅ TEST 3: POST /api/generate with invalid data {"topic":"only"}
+          - Returns 400 with error message ✅
+          - Validation working correctly ✅
+          
+          ✅ TEST 4: GET /api/notes
+          - Returns 200 with array of 14 notes ✅
+          - All notes exclude 'content' field ✅
+          - All notes exclude '_id' field ✅
+          - No pending notes in list ✅
+          - Completed note from Test 2 found in list ✅
+          
+          ✅ TEST 5: DELETE /api/notes/{id}
+          - Returns 200 with {ok: true} ✅
+          - Subsequent GET /api/notes/{id} returns 404 ✅
+          
+          ✅ TEST 6: POST /api/generate (exam_tomorrow mode - Pythagoras theorem)
+          - Returns 202, polls to done in 78s ✅
+          - mode field correctly set to "exam_tomorrow" ✅
+          - content non-null with all required keys ✅
+          - title: "Pythagoras Theorem: Last-Minute Exam Mastery" ✅
+          
+          FIXES THAT WORKED:
+          1. ✅ jsonrepair package as fallback for malformed JSON
+          2. ✅ Increased max_tokens from 4500 to 8000
+          3. ✅ Added response_format: {type: 'json_object'} hint to LLM
+          4. ✅ Improved extractJson() to handle markdown code fences
+          5. ✅ Async job pattern bypasses Cloudflare 60s timeout
+          
+          RESULT: 6/6 tests passed. No JSON parsing errors. No timeout issues. Production-ready! 🚀

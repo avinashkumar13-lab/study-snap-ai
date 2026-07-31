@@ -1,6 +1,7 @@
 import { MongoClient } from 'mongodb'
 import { v4 as uuidv4 } from 'uuid'
 import { NextResponse } from 'next/server'
+import { jsonrepair } from 'jsonrepair'
 
 export const runtime = 'nodejs'
 export const maxDuration = 300
@@ -98,15 +99,24 @@ function extractJson(text) {
   }
   const start = s.indexOf('{')
   const end = s.lastIndexOf('}')
-  if (start === -1 || end === -1) return null
-  const jsonStr = s.slice(start, end + 1)
-  try { return JSON.parse(jsonStr) } catch (e) { 
-    console.error('JSON parse error:', e.message, 'First 200 chars:', jsonStr.slice(0, 200))
-    return null 
+  if (start === -1) return null
+  // Try strict parse from first `{` to last `}` first
+  if (end !== -1) {
+    const jsonStr = s.slice(start, end + 1)
+    try { return JSON.parse(jsonStr) } catch (_) { /* fall through */ }
+    try { return JSON.parse(jsonrepair(jsonStr)) } catch (_) { /* fall through */ }
+  }
+  // Handle truncated output: repair from first `{` onward
+  try {
+    const jsonStr = s.slice(start)
+    return JSON.parse(jsonrepair(jsonStr))
+  } catch (e) {
+    console.error('JSON parse error after repair:', e.message)
+    return null
   }
 }
 
-async function callLLM(messages, { maxTokens = 4500, temperature = 0.3 } = {}) {
+async function callLLM(messages, { maxTokens = 8000, temperature = 0.3 } = {}) {
   const res = await fetch(EMERGENT_LLM_URL, {
     method: 'POST',
     headers: {
@@ -118,6 +128,7 @@ async function callLLM(messages, { maxTokens = 4500, temperature = 0.3 } = {}) {
       messages,
       max_tokens: maxTokens,
       temperature,
+      response_format: { type: 'json_object' },
     }),
   })
   if (!res.ok) {
@@ -136,7 +147,7 @@ async function processNoteJob(noteId, input) {
       { role: 'system', content: buildSystemPrompt() },
       { role: 'user', content: buildUserPrompt(input) },
     ]
-    const raw = await callLLM(messages, { maxTokens: 4500, temperature: 0.3 })
+    const raw = await callLLM(messages, { maxTokens: 8000, temperature: 0.3 })
     const parsed = extractJson(raw)
     if (!parsed) {
       console.error(`[processNoteJob ${noteId}] Failed to parse LLM response. First 500 chars:`, raw?.slice(0, 500))
@@ -215,7 +226,7 @@ async function handleRoute(request, { params }) {
         { role: 'system', content: buildSystemPrompt() },
         { role: 'user', content: buildUserPrompt({ degree, program, course, subject, topic, teacher, length, mode }) },
       ]
-      const raw = await callLLM(messages, { maxTokens: 4500, temperature: 0.3 })
+      const raw = await callLLM(messages, { maxTokens: 8000, temperature: 0.3 })
       const parsed = extractJson(raw)
       if (!parsed) {
         return handleCORS(NextResponse.json({ error: 'Failed to parse AI response', raw: raw.slice(0, 500) }, { status: 502 }))
