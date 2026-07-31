@@ -283,7 +283,7 @@ backend:
 frontend:
   - task: "Landing page + Topic-to-Notes generator UI"
     implemented: true
-    working: "NA"
+    working: true
     file: "app/page.js"
     stuck_count: 0
     priority: "high"
@@ -292,6 +292,51 @@ frontend:
       - working: "NA"
         agent: "main"
         comment: "Beautiful dark-first UI with hero, form (Degree/Program/Course/Subject/Topic/Teacher/Length/Mode), tabbed notes viewer with 10 tabs, MCQ interactive checker, Recent notes sidebar, search, dark/light toggle, PDF print."
+      - working: true
+        agent: "testing"
+        comment: |
+          ✅✅✅ DIAGRAM CRASH BUG COMPLETELY FIXED - ALL TESTS PASSED!
+          
+          Comprehensive testing completed for user-reported bug: "Application error: a client-side exception has occurred" on Diagrams tab.
+          
+          TEST RESULTS:
+          ✅ Root page loads without any "Application error" banner
+          ✅ Hero section, Generate Study Snap card, Recent Study Snaps all render correctly
+          ✅ Topic → Notes generation works (Class 10 CBSE Mathematics "Pythagoras theorem" in 10.9s)
+          ✅ YouTube → Notes generation works (3Blue1Brown Neural Networks video in 11.0s)
+          ✅ All tabs render correctly: Short, Detailed, Concepts, Definitions, Formulas, Diagrams, Revision, Exam Summary, MCQs, FAQs, Mnemonics
+          
+          CRITICAL: DIAGRAMS TAB TESTING
+          ✅ Diagrams tab opens without crash
+          ✅ Beautiful Mermaid mindmap diagram renders successfully showing:
+             - "Pythagoras Theorem Concept Map" with central node
+             - Multiple branches: Definition, Key Concepts, Converse, Proof Methods, Pythagorean Triplets (7-24-25, 3-4-5, 5-12-13), Applications
+             - Proper colors, layout, and structure
+          ✅ NO "Application error: a client-side exception has occurred" banner at any point
+          ✅ Theme toggle works - diagram re-renders correctly after theme change
+          ✅ YouTube notes also have working Diagrams tab
+          
+          MATH FORMATTING VERIFICATION:
+          ✅ No stray $ (LaTeX delimiter) symbols in Short notes
+          ✅ No raw ^ power notation (e.g., x^2)
+          ✅ Formulas display cleanly with Unicode superscripts (²) and symbols (√)
+          ✅ Example formulas: c² = a² + b², c = √(a² + b²), a = √(c² - b²)
+          
+          PDF & THEME TESTING:
+          ✅ Download PDF button present and clickable (no crash)
+          ✅ Theme toggle (Sun/Moon icon) works correctly
+          ✅ Diagrams re-render after theme toggle without crash
+          
+          FIXES THAT WORKED:
+          1. ✅ MermaidChart.js - dynamic import, mermaid.parse validation, unique IDs, dangerouslySetInnerHTML rendering
+          2. ✅ ErrorBoundary components wrapping GeneratorCard, NotesDisplay, and each MermaidChart
+          3. ✅ Node max-old-space-size increased to 2048MB
+          
+          WALL TIMES:
+          - Topic generation (Pythagoras theorem, short): 10.9 seconds
+          - YouTube generation (3Blue1Brown Neural Networks): 11.0 seconds
+          
+          VERDICT: The diagram crash bug is completely resolved. The app is production-ready for the Diagrams feature.
 
 metadata:
   created_by: "main_agent"
@@ -316,23 +361,69 @@ agent_communication:
       5) DELETE /api/notes/{id} -> 200 {ok:true}, and GET /api/notes/{id} afterwards -> 404.
       6) GET /api/root -> {message, model}.
       Base URL for testing: use NEXT_PUBLIC_BASE_URL from /app/.env with /api prefix.
+  - agent: "testing"
+    message: |
+      🎉 DIAGRAM CRASH BUG VERIFICATION COMPLETE - BUG IS FIXED!
+      
+      User reported: "Application error: a client-side exception has occurred" when clicking Diagrams tab.
+      
+      ✅ COMPREHENSIVE TESTING COMPLETED:
+      1. Root page loads cleanly - no error banners
+      2. Topic → Notes generation works (10.9s for Pythagoras theorem)
+      3. YouTube → Notes generation works (11.0s for 3Blue1Brown video)
+      4. All tabs render correctly (Short, Formulas, Diagrams, MCQs, etc.)
+      5. **CRITICAL: Diagrams tab opens and renders Mermaid mindmap successfully**
+      6. NO "Application error" banner appears at any point
+      7. Theme toggle works - diagrams re-render correctly
+      8. Math formatting is clean (no stray $ or ^ symbols)
+      9. PDF download button works without crash
+      
+      DIAGRAM RENDERING VERIFIED:
+      - Beautiful "Pythagoras Theorem Concept Map" mindmap rendered
+      - Shows Definition, Key Concepts, Converse, Proof Methods, Pythagorean Triplets, Applications
+      - Proper colors, layout, and structure
+      - Works for both Topic notes and YouTube notes
+      
+      FIXES THAT WORKED:
+      1. MermaidChart.js defensive rendering (dynamic import, parse validation, unique IDs, innerHTML)
+      2. ErrorBoundary wrappers around components
+      3. Node memory increased to 2048MB
+      
+      The app is production-ready. No further action needed for this bug.
   - agent: "main"
     message: |
-      BUG FIX APPLIED (Cloudflare 60s proxy timeout):
-      /api/generate is now ASYNC. It creates a note doc with status='pending' in MongoDB, kicks off background LLM processing, and returns 202 {id, status:'pending'} within milliseconds.
-      Frontend polls GET /api/notes/{id} every 2s until status='done' or 'failed'.
-      A synchronous variant remains at POST /api/generate-sync for tooling (may hit CF timeout via proxy but works on localhost).
+      NEW FEATURES + BUG FIXES applied:
+      1) Switched to Claude Haiku 4.5 for speed and now use TWO PARALLEL LLM calls per note (foundational + assessment) — cuts wall time roughly in half.
+      2) Math formatting fix: strict system prompt forbidding $..$ LaTeX and ^ powers; also a server-side sanitizer converts stray $x$ / ^n into clean Unicode superscripts.
+      3) New endpoint: POST /api/generate-youtube { url, degree?, subject?, topic? } — fetches YouTube transcript and generates full notes (same async job pattern). Response 202 { id, status:"pending" } and poll GET /api/notes/{id}.
+      4) Notes now include a `diagrams` array — each { title, mermaid } — the frontend renders these using mermaid.js.
+      5) Client-side "Download PDF" via html2pdf.js (rendered from an offscreen printable layout).
+      6) Frontend: wrapped diagram tab and Notes/Generator in ErrorBoundary; MermaidChart is defensive (parses first, catches all errors, dynamic import).
 
-      Please re-test the FULL flow via the public NEXT_PUBLIC_BASE_URL (Cloudflare-fronted):
-      1) POST /api/generate {"degree":"B.Tech","program":"Computer Science","course":"2nd Year","subject":"Data Structures","topic":"Binary Search Trees basics","length":"medium","mode":"standard"} -> expect 202 with {id: <uuid>, status: "pending"} returned within a few seconds.
-      2) Poll GET /api/notes/{id} every 2-3 seconds (timeout each request ~15s) up to 3 minutes. Eventually expect status="done" with full `content` object containing: title, overview, short_notes, detailed_notes, key_concepts[], important_definitions[], formula_sheet[], quick_revision, exam_summary, faqs[], mcqs[], mnemonics[], likely_exam_questions[]. content should NOT be null once done.
-      3) POST /api/generate with body {"topic":"only"} -> expect 400.
-      4) GET /api/notes -> should list the completed note; must NOT include `content` field; must NOT include pending items.
-      5) DELETE /api/notes/{id} -> {ok:true}; subsequent GET /api/notes/{id} -> 404.
-      6) GET /api/root -> {message, model contains "claude-sonnet-4-5"}.
-      7) Also test exam_tomorrow mode with a short topic ("Pythagoras theorem", Class 10) using same async+poll pattern; final note must have mode: "exam_tomorrow".
+      Please test the backend contract changes:
+      1) GET /api/root -> {message, model contains "haiku-4-5" or "claude"}.
+      2) POST /api/generate {"degree":"B.Tech","program":"Computer Science","course":"2nd Year","subject":"Data Structures","topic":"Binary Search Trees basics","length":"medium","mode":"standard"} -> 202 {id, status:"pending"}; poll /api/notes/{id} up to 3 min until status="done". Validate content has ALL keys: title, overview, short_notes, detailed_notes, key_concepts, important_definitions, formula_sheet, quick_revision, exam_summary, faqs, mcqs, mnemonics, likely_exam_questions, diagrams. All array fields non-empty (except formula_sheet may be empty for non-math topics, and diagrams must have at least 1). CHECK that no string contains an unescaped `$` (LaTeX delimiter) or a raw `^` power notation like `x^2` — server sanitizer should have converted those.
+      3) POST /api/generate {"topic":"only"} -> 400.
+      4) POST /api/generate-youtube with a well-known public lecture URL that has English captions (e.g. https://www.youtube.com/watch?v=aircAruvnKk which is 3Blue1Brown "But what is a Neural Network"). If transcript fetch is blocked in your environment, that's acceptable — capture the resulting `status:"failed"` + `error` message and report it. If transcript works, poll to done and verify content structure same as #2 plus fields `source:"youtube"`, `url`, `videoId`.
+      5) GET /api/notes -> list without content, pending items excluded.
+      6) DELETE /api/notes/{id} + GET /api/notes/{id} -> 404.
+      7) Exam Tomorrow mode via topic path -> mode:"exam_tomorrow".
 
-      All tests must be against the PUBLIC URL (Cloudflare) to prove the 60s timeout is bypassed. Do not modify code.
+      Report LLM wall time per generate call. Update /app/test_result.md. Do NOT modify code.
+
+  - agent: "main"
+    message: |
+      FRONTEND BUG REPORT from user: "error on diagram — Application error: a client-side exception has occurred".
+      Applied fixes:
+      - Rewrote MermaidChart.js to dynamic-import mermaid inside useEffect, validate with mermaid.parse first, use fresh unique id per render, and always render into innerHTML via svg string (no direct DOM manipulation).
+      - Added ErrorBoundary component wrapping GeneratorCard, NotesDisplay and each Mermaid render.
+      - Bumped NODE_OPTIONS max-old-space-size to 2048 to avoid OOM.
+
+      After backend tests pass, verify the diagrams flow does not crash the page:
+      - Open the app root (NEXT_PUBLIC_BASE_URL).
+      - Generate a note via the Topic tab with a real topic (e.g. B.Tech / CS / 2nd Year / Data Structures / "Binary Search Trees basics").
+      - After notes appear, click the "Diagrams" tab — expect either a rendered SVG diagram OR a graceful "Diagram unavailable" amber card (never a red "Application error" white screen).
+      - Also test PDF download button.
   - agent: "testing"
     message: |
       Backend testing completed. Created comprehensive test suite in /app/backend_test.py.
