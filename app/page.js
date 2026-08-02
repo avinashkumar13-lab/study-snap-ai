@@ -20,10 +20,22 @@ import {
   Sparkles, Brain, Zap, GraduationCap, BookOpen, Timer, FileDown, Printer,
   Sun, Moon, Loader2, ListChecks, ClipboardList, Lightbulb, HelpCircle,
   Calculator, ScrollText, BookMarked, PenTool, History, Trash2, Search,
-  Youtube, Network, ArrowRight
+  Youtube, Network, ArrowRight, Target, Trophy
 } from 'lucide-react'
 import { DEGREES, getPrograms, getCourses, getSubjects } from '@/lib/curriculum'
 import ErrorBoundary from '@/components/ErrorBoundary'
+import LionLogo from '@/components/LionLogo'
+
+const Quiz = dynamic(() => import('@/components/Quiz'), { ssr: false })
+
+const EXAMS = [
+  'NEET', 'JEE Main', 'JEE Advanced',
+  'CBSE Class 10', 'CBSE Class 12', 'State Boards',
+  'SSC', 'SSC CGL', 'SSC CHSL',
+  'Railway Group D', 'Railway Group C',
+  'Banking Exams', 'UPSC', 'CUET', 'NDA', 'Defence Exams',
+  'Other Competitive Exams',
+]
 
 const MermaidChart = dynamic(() => import('@/components/MermaidChart'), { ssr: false })
 
@@ -53,6 +65,35 @@ function ThemeToggle() {
   )
 }
 
+function CreatorBadge() {
+  return (
+    <a
+      href="#"
+      onClick={(e) => e.preventDefault()}
+      className="group hidden sm:flex items-center gap-2 rounded-full border border-amber-500/40 bg-gradient-to-r from-amber-500/10 via-yellow-500/10 to-amber-500/10 pl-1.5 pr-3 py-1 backdrop-blur transition hover:border-amber-400/70 hover:shadow-[0_0_18px_rgba(245,197,66,0.4)]"
+      aria-label="Created by Avinash Kumar"
+      title="Created by Avinash Kumar"
+    >
+      <LionLogo className="h-6 w-6 shrink-0 drop-shadow-[0_0_6px_rgba(245,197,66,0.6)]" />
+      <div className="leading-tight text-left">
+        <div className="text-[9px] uppercase tracking-[0.18em] text-amber-500/80">Created by</div>
+        <div className="text-xs font-semibold bg-gradient-to-r from-amber-300 via-yellow-200 to-amber-400 bg-clip-text text-transparent">Avinash Kumar</div>
+      </div>
+    </a>
+  )
+}
+
+function CreatorBadgeMobile() {
+  return (
+    <div className="sm:hidden flex justify-end px-4 pt-2">
+      <div className="inline-flex items-center gap-2 rounded-full border border-amber-500/40 bg-amber-500/10 pl-1.5 pr-3 py-1">
+        <LionLogo className="h-5 w-5" />
+        <div className="text-[11px] font-semibold bg-gradient-to-r from-amber-300 to-amber-500 bg-clip-text text-transparent">Created by Avinash Kumar</div>
+      </div>
+    </div>
+  )
+}
+
 function NavBar() {
   return (
     <nav className="sticky top-0 z-40 no-print border-b border-border/50 bg-background/70 backdrop-blur-xl">
@@ -66,8 +107,9 @@ function NavBar() {
             <div className="text-[10px] uppercase tracking-widest text-muted-foreground">Exam-ready in seconds</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Badge variant="secondary" className="hidden md:inline-flex">Claude Haiku 4.5</Badge>
+        <div className="flex items-center gap-2 md:gap-3">
+          <CreatorBadge />
+          <Badge variant="secondary" className="hidden lg:inline-flex">Claude Haiku 4.5</Badge>
           <ThemeToggle />
         </div>
       </div>
@@ -348,21 +390,126 @@ function YouTubeForm({ onGenerated }) {
   )
 }
 
-function GeneratorCard({ onGenerated }) {
+function QuizForm({ onGenerated }) {
+  const [exam, setExam] = useState('NEET')
+  const [subject, setSubject] = useState('')
+  const [topic, setTopic] = useState('')
+  const [count, setCount] = useState('20')
+  const [loading, setLoading] = useState(false)
+  const [progress, setProgress] = useState(0)
+
+  const canSubmit = exam && !loading
+
+  const submit = async () => {
+    if (!canSubmit) { toast.error('Please pick an exam'); return }
+    setLoading(true); setProgress(3)
+    try {
+      const res = await fetch('/api/generate-quiz', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ exam, subject, topic, count: parseInt(count) || 20 }),
+      })
+      const data = await safeJson(res)
+      if (!res.ok || !data) throw new Error(data?.error || `Server error (${res.status})`)
+      setProgress(15)
+      // Poll quizzes
+      const start = Date.now()
+      let quiz = null
+      for (let i = 0; i < 150; i++) {
+        await new Promise(r => setTimeout(r, 2000))
+        const r = await fetch(`/api/quizzes/${data.id}`, { cache: 'no-store' })
+        if (r.status === 404) continue
+        const d = await safeJson(r)
+        if (!d) continue
+        setProgress(Math.min(95, Math.round((Date.now() - start) / 500)))
+        if (d.status === 'done') { quiz = d; break }
+        if (d.status === 'failed') throw new Error(d.error || 'AI generation failed')
+      }
+      if (!quiz) throw new Error('Quiz timed out. Please try again.')
+      setProgress(100)
+      toast.success('Your quiz is ready!')
+      onGenerated(quiz)
+    } catch (e) {
+      toast.error(e.message || 'Something went wrong')
+    } finally {
+      setLoading(false)
+      setTimeout(() => setProgress(0), 800)
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm text-muted-foreground flex gap-2 items-start">
+        <Target className="h-5 w-5 text-amber-500 shrink-0 mt-0.5" />
+        <div>Generate a fresh set of previous-year-style MCQs. Pick your exam, add a topic if you like, and start practising.</div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <div className="space-y-2">
+          <Label>Exam</Label>
+          <Select value={exam} onValueChange={setExam}>
+            <SelectTrigger><SelectValue placeholder="Choose exam" /></SelectTrigger>
+            <SelectContent>{EXAMS.map(e => <SelectItem key={e} value={e}>{e}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Number of Questions</Label>
+          <Select value={count} onValueChange={setCount}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {['10','15','20','25','30'].map(n => <SelectItem key={n} value={n}>{n} MCQs</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-2">
+          <Label>Subject (optional)</Label>
+          <Input value={subject} onChange={e => setSubject(e.target.value)} placeholder="e.g. Biology, Quant, Reasoning…" />
+        </div>
+        <div className="space-y-2">
+          <Label>Topic (optional)</Label>
+          <Input value={topic} onChange={e => setTopic(e.target.value)} placeholder="e.g. Human Physiology, Number Series…" />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 pt-1">
+        <Button size="lg" disabled={!canSubmit} onClick={submit} className="h-12 px-6 rounded-xl glow">
+          {loading ? <Loader2 className="mr-2 h-5 w-5 animate-spin" /> : <Trophy className="mr-2 h-5 w-5" />}
+          Generate {parseInt(count) || 20} MCQs
+        </Button>
+        <span className="text-xs text-muted-foreground">Fresh questions each time · Mixed difficulty · With explanations</span>
+      </div>
+
+      {loading && (
+        <div className="space-y-2">
+          <Progress value={progress} className="h-2" />
+          <div className="text-xs text-muted-foreground flex items-center gap-2">
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {progress < 20 && 'Analysing previous year trends…'}
+            {progress >= 20 && progress < 60 && 'Composing questions & distractors…'}
+            {progress >= 60 && 'Writing explanations & tagging concepts…'}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GeneratorCard({ onGeneratedNote, onGeneratedQuiz }) {
   return (
     <Card id="generator" className="border-border/60 bg-card/70 backdrop-blur">
       <CardHeader>
         <CardTitle className="text-2xl">Generate Study Snap</CardTitle>
-        <CardDescription>Choose Topic-to-Notes or YouTube-to-Notes.</CardDescription>
+        <CardDescription>Topic notes, YouTube summaries or previous-year MCQ quizzes — all in seconds.</CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="topic">
-          <TabsList className="mb-4 no-print">
+          <TabsList className="mb-4 no-print flex flex-wrap h-auto gap-1">
             <TabsTrigger value="topic"><BookOpen className="h-4 w-4 mr-1" /> Topic → Notes</TabsTrigger>
             <TabsTrigger value="youtube"><Youtube className="h-4 w-4 mr-1" /> YouTube → Notes</TabsTrigger>
+            <TabsTrigger value="quiz"><Target className="h-4 w-4 mr-1" /> Previous Year MCQs</TabsTrigger>
           </TabsList>
-          <TabsContent value="topic"><TopicForm onGenerated={onGenerated} /></TabsContent>
-          <TabsContent value="youtube"><YouTubeForm onGenerated={onGenerated} /></TabsContent>
+          <TabsContent value="topic"><TopicForm onGenerated={onGeneratedNote} /></TabsContent>
+          <TabsContent value="youtube"><YouTubeForm onGenerated={onGeneratedNote} /></TabsContent>
+          <TabsContent value="quiz"><QuizForm onGenerated={onGeneratedQuiz} /></TabsContent>
         </Tabs>
       </CardContent>
     </Card>
@@ -722,6 +869,7 @@ function RecentNotes({ items, onSelect, onDelete }) {
 
 function App() {
   const [note, setNote] = useState(null)
+  const [quiz, setQuiz] = useState(null)
   const [recent, setRecent] = useState([])
   const [query, setQuery] = useState('')
 
@@ -734,10 +882,16 @@ function App() {
 
   useEffect(() => { loadRecent() }, [])
 
-  const onGenerated = (n) => {
+  const onGeneratedNote = (n) => {
     setNote(n)
+    setQuiz(null)
     loadRecent()
     setTimeout(() => document.getElementById('notes-result')?.scrollIntoView({ behavior: 'smooth' }), 100)
+  }
+
+  const onGeneratedQuiz = (q) => {
+    setQuiz(q)
+    setTimeout(() => document.getElementById('quiz-result')?.scrollIntoView({ behavior: 'smooth' }), 100)
   }
 
   const openNote = async (id) => {
@@ -745,6 +899,7 @@ function App() {
     if (r.ok) {
       const n = await r.json()
       setNote(n)
+      setQuiz(null)
       setTimeout(() => document.getElementById('notes-result')?.scrollIntoView({ behavior: 'smooth' }), 100)
     }
   }
@@ -765,12 +920,23 @@ function App() {
   return (
     <div className="min-h-screen">
       <NavBar />
+      <CreatorBadgeMobile />
       <Hero onScrollToForm={scrollForm} />
 
       <main className="container pb-24 space-y-8">
         <div className="grid gap-8 lg:grid-cols-[1fr_340px]">
           <div className="space-y-8">
-            <ErrorBoundary><GeneratorCard onGenerated={onGenerated} /></ErrorBoundary>
+            <ErrorBoundary><GeneratorCard onGeneratedNote={onGeneratedNote} onGeneratedQuiz={onGeneratedQuiz} /></ErrorBoundary>
+            {quiz && (
+              <div id="quiz-result">
+                <ErrorBoundary>
+                  <Quiz
+                    quiz={quiz}
+                    onNewSet={() => { setQuiz(null); scrollForm() }}
+                  />
+                </ErrorBoundary>
+              </div>
+            )}
             <ErrorBoundary><NotesDisplay note={note} /></ErrorBoundary>
           </div>
 
@@ -792,7 +958,7 @@ function App() {
               <CardContent className="text-sm text-muted-foreground space-y-2">
                 <p>• Be specific in the Topic field — e.g. &quot;Photosynthesis: light &amp; dark reactions&quot;.</p>
                 <p>• Paste a YouTube lecture URL to auto-generate notes from its transcript.</p>
-                <p>• Open <b>Diagrams</b> tab to see auto-generated concept maps.</p>
+                <p>• Try <b>Previous Year MCQs</b> for exam-style practice sets.</p>
                 <p>• Click <b>Download PDF</b> to save clean printable notes.</p>
               </CardContent>
             </Card>
@@ -801,7 +967,10 @@ function App() {
       </main>
 
       <footer className="no-print border-t border-border/50 py-6 text-center text-xs text-muted-foreground">
-        Built with Claude Haiku 4.5 • Study Snap AI • Study smarter, not harder.
+        <div className="flex items-center justify-center gap-2">
+          <LionLogo className="h-5 w-5" />
+          <span>Study Snap AI · Created by <span className="bg-gradient-to-r from-amber-300 to-amber-500 bg-clip-text text-transparent font-semibold">Avinash Kumar</span> · Built with Claude Haiku 4.5</span>
+        </div>
       </footer>
     </div>
   )

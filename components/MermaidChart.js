@@ -40,12 +40,35 @@ export default function MermaidChart({ code, theme = 'dark' }) {
       try {
         const mermaidModule = await import('mermaid')
         const mermaid = mermaidModule.default || mermaidModule
+        const isDark = theme === 'dark'
         mermaid.initialize({
           startOnLoad: false,
-          theme: theme === 'dark' ? 'dark' : 'default',
+          theme: 'base',
           securityLevel: 'loose',
-          fontFamily: 'inherit',
+          fontFamily: 'Inter, ui-sans-serif, system-ui',
           suppressErrorRendering: true,
+          themeVariables: {
+            // Premium palette
+            primaryColor: isDark ? '#7c3aed' : '#8b5cf6',
+            primaryTextColor: '#ffffff',
+            primaryBorderColor: isDark ? '#a78bfa' : '#7c3aed',
+            lineColor: isDark ? '#94a3b8' : '#475569',
+            secondaryColor: isDark ? '#0284c7' : '#38bdf8',
+            tertiaryColor: isDark ? '#059669' : '#10b981',
+            background: 'transparent',
+            mainBkg: isDark ? '#7c3aed' : '#8b5cf6',
+            secondBkg: isDark ? '#0284c7' : '#38bdf8',
+            tertiaryBkg: isDark ? '#059669' : '#10b981',
+            nodeBorder: isDark ? '#a78bfa' : '#7c3aed',
+            clusterBkg: isDark ? 'rgba(124,58,237,0.08)' : 'rgba(139,92,246,0.1)',
+            clusterBorder: isDark ? '#a78bfa' : '#7c3aed',
+            titleColor: isDark ? '#f5f5ff' : '#111',
+            edgeLabelBackground: isDark ? '#0b0b12' : '#ffffff',
+            textColor: isDark ? '#e2e8f0' : '#1e293b',
+            fontSize: '14px',
+          },
+          flowchart: { curve: 'basis', padding: 12, htmlLabels: true, useMaxWidth: true },
+          mindmap: { padding: 12, useMaxWidth: true },
         })
 
         // Validate first — throws on syntax error

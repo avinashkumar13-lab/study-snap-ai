@@ -102,26 +102,38 @@ function promptAssessment(ctx) {
   "mcqs": [ { "question": "MCQ", "options": ["A. ...","B. ...","C. ...","D. ..."], "answer": "A", "explanation": "why" } ],
   "mnemonics": [ { "for": "what it helps remember", "trick": "memory trick" } ],
   "likely_exam_questions": [ "question 1", "question 2" ],
-  "diagrams": [ { "title": "diagram title", "mermaid": "valid mermaid code" } ]
+  "diagrams": [ { "title": "diagram title", "kind": "mindmap|flowchart|process|comparison", "mermaid": "valid mermaid code" } ]
 }
 
-Counts (STRICT): faqs=4, mcqs=5, mnemonics=3, likely_exam_questions=5, diagrams=1.
-Keep exam_summary and quick_revision concise. Prefer brevity over verbosity.
+Counts (STRICT): faqs=4, mcqs=5, mnemonics=3, likely_exam_questions=5, diagrams=2.
+For MCQ answer, return just the letter (A/B/C/D). Keep exam_summary and quick_revision concise.
 
-DIAGRAM RULES:
-- Use mermaid v10 syntax.
-- Prefer mindmap for concept maps. Example:
-mindmap
-  root((Topic))
-    Idea1
-      Sub1
-      Sub2
-    Idea2
-- Or flowchart TD for processes. Example:
-flowchart TD
-  A[Start] --> B[Step 1]
-  B --> C[End]
-- Labels alphanumeric + spaces only. No quotes/special chars inside labels. No parentheses inside node labels (except mindmap root).
+DIAGRAM RULES — MAKE THEM VISUALLY RICH AND EXAM-FRIENDLY:
+- Provide TWO diagrams of DIFFERENT kinds. Choose two from: mindmap (concept map), flowchart (process/decision), or a comparison layout using flowchart LR.
+- Use mermaid v10 syntax that renders without extra config.
+- COLOR the diagrams using classDef blocks — one classDef per category, with distinct fills. Example:
+  classDef primary fill:#7c3aed,stroke:#a78bfa,color:#fff,stroke-width:2px;
+  classDef success fill:#059669,stroke:#34d399,color:#fff,stroke-width:2px;
+  classDef warn    fill:#d97706,stroke:#fbbf24,color:#fff,stroke-width:2px;
+  classDef info    fill:#0284c7,stroke:#38bdf8,color:#fff,stroke-width:2px;
+  classDef danger  fill:#dc2626,stroke:#f87171,color:#fff,stroke-width:2px;
+  Then apply with:  class NodeA,NodeB primary;  class NodeC success;
+- For MINDMAP: use root((Topic)) and expressive sub-branches (up to 3 levels). Prefix branches with emoji-free short keyphrases only.
+  Example:
+  mindmap
+    root((Photosynthesis))
+      Light Reactions
+        PSII splits water
+        ATP formed
+      Dark Reactions
+        Calvin cycle
+        Sugar synthesis
+      Factors
+        Light intensity
+        CO2 level
+- For FLOWCHART: use "flowchart TD" or "flowchart LR". Use shapes: rectangles A[Text], rhombus for decisions A{Question?}, rounded A(Text), stadium A([Text]). Add labelled arrows: A -- yes --> B; A -- no --> C.
+- KEEP labels short (max 5 words). No parentheses/quotes inside labels. Use plain ASCII letters, digits, spaces, dashes.
+- Prefer 8-15 nodes per diagram — rich enough to be useful, not overwhelming.
 
 CONTEXT:
 ${contextBlock(ctx)}
@@ -311,7 +323,109 @@ async function processYouTubeJob(noteId, input) {
   }
 }
 
-// ---------- Router ----------
+// ---------- Previous Year MCQ generation ----------
+const EXAM_STYLE_HINTS = {
+  'NEET': 'NEET (India) — Biology 50%, Physics 25%, Chemistry 25%. NCERT-based. Assertion-reason and matrix-match style included.',
+  'JEE Main': 'JEE Main (India) — Physics, Chemistry, Math. Conceptual + numerical single-correct MCQs. Application-heavy.',
+  'JEE Advanced': 'JEE Advanced (India) — hardest reasoning, multi-step problems, integer/multi-correct patterns simplified to single-correct.',
+  'CBSE Class 10': 'CBSE Class 10 Board style — case-based & competency questions. Aligned with NCERT.',
+  'CBSE Class 12': 'CBSE Class 12 Board style — assertion-reason, case-based, NCERT-aligned.',
+  'State Boards': 'Indian State Boards — textbook-aligned, moderate difficulty.',
+  'SSC': 'SSC style — general awareness, quant, reasoning, English.',
+  'SSC CGL': 'SSC CGL (Tier 1) — GA, Quant, Reasoning, English. Speed + accuracy focused.',
+  'SSC CHSL': 'SSC CHSL — 10+2 level GA, Quant, Reasoning, English.',
+  'Railway Group D': 'Railway Group D — Math, Reasoning, GS, General Science (10th level).',
+  'Railway Group C': 'Railway Group C (RRB NTPC-like) — Math, Reasoning, GA. Moderate difficulty.',
+  'Banking Exams': 'Banking (IBPS/SBI PO) — Quant DI, Reasoning, English, GA (banking/current affairs).',
+  'UPSC': 'UPSC CSE Prelims — analytical, factual, current-affairs-tinged. Multi-statement type simplified to single-correct.',
+  'CUET': 'CUET UG — domain-specific + general test. NCERT-based domain MCQs.',
+  'NDA': 'NDA — Math (10+2), GAT (English, GK, Physics, Chem, GS, History, Geography).',
+  'Defence Exams': 'Defence exams (CDS/AFCAT) — English, GK, Elementary Mathematics.',
+  'Other Competitive Exams': 'General competitive exam style — mixed difficulty, PYQ-inspired.',
+}
+
+function promptQuiz({ exam, subject, topic, count = 20 }) {
+  const hint = EXAM_STYLE_HINTS[exam] || 'General competitive exam style.'
+  return `Generate exactly ${count} previous-year-style MCQs for a student preparing for the following exam. Base them on typical PYQ trends, high-yield concepts, and common traps.
+
+EXAM: ${exam}
+SUBJECT: ${subject || 'General'}
+TOPIC: ${topic || 'Overall'}
+EXAM STYLE: ${hint}
+
+Return strict JSON only:
+{
+  "exam": "${exam}",
+  "subject": ${JSON.stringify(subject || '')},
+  "topic": ${JSON.stringify(topic || '')},
+  "questions": [
+    {
+      "question": "the question stem (concise)",
+      "options": ["A. option 1", "B. option 2", "C. option 3", "D. option 4"],
+      "answer": "A",
+      "explanation": "1-3 line explanation focused on why the answer is correct and common wrong assumptions",
+      "concept": "the key concept/topic tested",
+      "difficulty": "easy" 
+    }
+  ]
+}
+
+Rules:
+- EXACTLY ${count} questions.
+- Mix of difficulty: ~7 easy, ~8 medium, ~5 hard.
+- Vary the questions each time. Do NOT repeat classic textbook definitions in every question — mix conceptual, application, numerical, statement-based, and assertion-style items (each rewritten as a single-correct MCQ).
+- Only ONE correct option per question.
+- "answer" is JUST the letter (A/B/C/D).
+- "difficulty" is one of "easy","medium","hard".
+- Options must all be plausible; do not include "None of the above" more than twice total.
+${MATH_STYLE}
+
+Return ONLY the JSON.`
+}
+
+async function processQuizJob(quizId, input) {
+  try {
+    const db = await connectToMongo()
+    const sys = { role: 'system', content: 'You are an expert exam-question setter for Indian competitive exams. Output strict JSON only.\n' + MATH_STYLE }
+    const raw = await callLLM(
+      [sys, { role: 'user', content: promptQuiz(input) }],
+      { maxTokens: 6000, temperature: 0.7 }
+    )
+    const parsed = extractJson(raw)
+    if (!parsed || !Array.isArray(parsed.questions) || parsed.questions.length === 0) {
+      await db.collection('quizzes').updateOne(
+        { id: quizId },
+        { $set: { status: 'failed', error: 'AI response could not be parsed', updatedAt: new Date() } }
+      )
+      return
+    }
+    // Sanitize math in questions/options/explanations
+    const questions = parsed.questions.map(q => deepSanitize({
+      question: q.question || '',
+      options: Array.isArray(q.options) ? q.options.slice(0, 4) : [],
+      answer: (q.answer || '').trim().toUpperCase().charAt(0),
+      explanation: q.explanation || '',
+      concept: q.concept || '',
+      difficulty: (q.difficulty || 'medium').toLowerCase(),
+    })).filter(q => q.question && q.options.length === 4 && ['A','B','C','D'].includes(q.answer))
+
+    await db.collection('quizzes').updateOne(
+      { id: quizId },
+      { $set: { status: 'done', questions, count: questions.length, updatedAt: new Date() } }
+    )
+  } catch (err) {
+    console.error('processQuizJob error:', err)
+    try {
+      const db = await connectToMongo()
+      await db.collection('quizzes').updateOne(
+        { id: quizId },
+        { $set: { status: 'failed', error: err?.message || 'Unknown error', updatedAt: new Date() } }
+      )
+    } catch { /* ignore */ }
+  }
+}
+
+
 async function handleRoute(request, { params }) {
   const { path = [] } = await params
   const route = `/${path.join('/')}`
@@ -387,6 +501,45 @@ async function handleRoute(request, { params }) {
 
     if (path[0] === 'notes' && path[1] && method === 'DELETE') {
       await db.collection('notes').deleteOne({ id: path[1] })
+      return handleCORS(NextResponse.json({ ok: true }))
+    }
+
+    // ---- Previous Year MCQ Quiz Generation (async) ----
+    if (route === '/generate-quiz' && method === 'POST') {
+      const body = await request.json()
+      const { exam, subject, topic, count } = body || {}
+      if (!exam) return handleCORS(NextResponse.json({ error: 'exam is required' }, { status: 400 }))
+      const quizId = uuidv4()
+      const n = Math.min(Math.max(parseInt(count) || 20, 5), 30)
+      await db.collection('quizzes').insertOne({
+        id: quizId,
+        exam, subject: subject || '', topic: topic || '',
+        status: 'pending', questions: null, count: n,
+        model: FAST_MODEL,
+        createdAt: new Date(), updatedAt: new Date(),
+      })
+      processQuizJob(quizId, { exam, subject, topic, count: n })
+        .catch(err => console.error('quiz job failed', err))
+      return handleCORS(NextResponse.json({ id: quizId, status: 'pending' }, { status: 202 }))
+    }
+
+    if (route === '/quizzes' && method === 'GET') {
+      const items = await db.collection('quizzes')
+        .find({ status: { $ne: 'pending' } }, { projection: { _id: 0, questions: 0 } })
+        .sort({ createdAt: -1 })
+        .limit(50)
+        .toArray()
+      return handleCORS(NextResponse.json(items))
+    }
+
+    if (path[0] === 'quizzes' && path[1] && method === 'GET') {
+      const item = await db.collection('quizzes').findOne({ id: path[1] }, { projection: { _id: 0 } })
+      if (!item) return handleCORS(NextResponse.json({ error: 'not found' }, { status: 404 }))
+      return handleCORS(NextResponse.json(item))
+    }
+
+    if (path[0] === 'quizzes' && path[1] && method === 'DELETE') {
+      await db.collection('quizzes').deleteOne({ id: path[1] })
       return handleCORS(NextResponse.json({ ok: true }))
     }
 
